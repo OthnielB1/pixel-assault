@@ -37,12 +37,19 @@ State is changed only through `setState(s)`, which also clears held input keys a
 
 ## Git Workflow
 
-Always commit after meaningful changes and push to keep GitHub in sync:
+**After every meaningful change, commit and push immediately.** Never leave work uncommitted. This ensures we can always revert to a working state and never lose progress.
 
 ```bash
 git add <file>
 git commit -m "descriptive message"
 git push
 ```
+
+Commit message rules:
+- Use a short imperative subject line (e.g. `Add spread shot power-up`)
+- Add a blank line then a brief body explaining *what* changed and *why* if it isn't obvious
+- Always include the co-author trailer: `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`
+
+Commit after: adding a feature, fixing a bug, reverting a change, or any edit the user asks for. When in doubt, commit.
 
 Remote: `https://github.com/OthnielB1/pixel-assault`
