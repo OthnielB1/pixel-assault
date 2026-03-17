@@ -65,19 +65,22 @@ const G = {
   lvlTimer: 0,     // level-complete countdown
   frame: 0,
   shakeTime: 0, shakeMag: 0,
-  mouse: { x: 0, y: 0 },
+  mouse: { x: 0, y: 0, down: false },
   keys: {},
 };
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
 canvas.addEventListener('mousemove', e => { G.mouse.x = e.clientX; G.mouse.y = e.clientY; });
 canvas.addEventListener('mousedown', e => {
-  if (G.state === 'PLAYING') shoot();
-  else if (G.state === 'MENU') menuClick(e.clientX, e.clientY);
+  if (e.button !== 0) return;
+  G.mouse.down = true;
+  if (G.state === 'MENU') menuClick(e.clientX, e.clientY);
   else if (G.state === 'GAME_OVER') gameOverClick(e.clientX, e.clientY);
   else if (G.state === 'LEVEL_COMPLETE') advanceLevel();
   else if (G.state === 'PAUSED') pauseClick(e.clientX, e.clientY);
 });
+canvas.addEventListener('mouseup', e => { if (e.button === 0) G.mouse.down = false; });
+canvas.addEventListener('mouseleave', () => { G.mouse.down = false; });
 window.addEventListener('keydown', e => {
   G.keys[e.code] = true;
   if (e.code === 'Escape') {
@@ -494,7 +497,7 @@ function applyPU(type) {
 function setState(s) {
   G.state = s;
   if (s === 'LEVEL_COMPLETE') { G.lvlTimer = 2500; }
-  if (s !== 'PLAYING') G.keys = {}; // clear held keys on state change
+  if (s !== 'PLAYING') { G.keys = {}; G.mouse.down = false; }
 }
 
 function startGame() {
@@ -560,6 +563,7 @@ function update(now) {
       p.y = Math.max(20, Math.min(H-20, p.y + (my/len)*p.speed*dt));
     }
 
+    if (G.mouse.down) shoot();
     if (p.cooldown > 0) p.cooldown -= dt*1000;
     if (p.flash > 0) p.flash--;
     if (p.iframes > 0) p.iframes -= dt*1000;
