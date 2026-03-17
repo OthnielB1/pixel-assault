@@ -32,6 +32,177 @@ function rr(ctx, x, y, w, h, r) {
 }
 const rand = (n) => (Math.random() - 0.5) * 2 * n;
 
+// ── AUDIO ─────────────────────────────────────────────────────────────────────
+let AC = null, sfxOut = null, musOut = null;
+let musActive = false, musMuted = false, musSchedUntil = 0, musIdx = 0, musTid = 0;
+
+function initAudio() {
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  sfxOut = AC.createGain(); sfxOut.gain.value = 0.45; sfxOut.connect(AC.destination);
+  musOut = AC.createGain(); musOut.gain.value = 0.2;  musOut.connect(AC.destination);
+}
+
+function _osc(freq, type, vol, dur, dst, t0) {
+  const t = t0 ?? AC.currentTime;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(dst ?? sfxOut);
+  o.start(t); o.stop(t + dur);
+}
+
+function _noise(vol, dur, bpFreq) {
+  const n = Math.ceil(AC.sampleRate * dur);
+  const buf = AC.createBuffer(1, n, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  f.type = 'bandpass'; f.frequency.value = bpFreq; f.Q.value = 0.8;
+  src.buffer = buf;
+  g.gain.setValueAtTime(vol, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + dur);
+  src.connect(f); f.connect(g); g.connect(sfxOut);
+  src.start(); src.stop(AC.currentTime + dur);
+}
+
+function sfxShoot() {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = 'square';
+  o.frequency.setValueAtTime(800, AC.currentTime);
+  o.frequency.exponentialRampToValueAtTime(180, AC.currentTime + 0.08);
+  g.gain.setValueAtTime(0.14, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + 0.08);
+  o.connect(g); g.connect(sfxOut); o.start(); o.stop(AC.currentTime + 0.08);
+}
+
+function sfxEnemyDie() {
+  if (!AC) return;
+  _noise(0.28, 0.14, 700);
+  _osc(110, 'sawtooth', 0.18, 0.1);
+}
+
+function sfxBossHit() {
+  if (!AC) return;
+  _noise(0.2, 0.08, 1200);
+}
+
+function sfxBossDie() {
+  if (!AC) return;
+  _noise(0.7, 0.9, 350);
+  _osc(55, 'sawtooth', 0.45, 0.8);
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(80, AC.currentTime);
+  o.frequency.exponentialRampToValueAtTime(900, AC.currentTime + 0.7);
+  g.gain.setValueAtTime(0.3, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + 0.7);
+  o.connect(g); g.connect(sfxOut); o.start(); o.stop(AC.currentTime + 0.7);
+}
+
+function sfxPlayerHit() {
+  if (!AC) return;
+  _noise(0.55, 0.3, 180);
+  _osc(75, 'sawtooth', 0.3, 0.22);
+}
+
+function sfxPowerUp() {
+  if (!AC) return;
+  [523, 659, 784, 1047].forEach((f, i) => _osc(f, 'sine', 0.2, 0.15, null, AC.currentTime + i * 0.08));
+}
+
+function sfxBossSpawn() {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(180, AC.currentTime);
+  o.frequency.exponentialRampToValueAtTime(35, AC.currentTime + 1.4);
+  g.gain.setValueAtTime(0.45, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + 1.4);
+  o.connect(g); g.connect(sfxOut); o.start(); o.stop(AC.currentTime + 1.4);
+  _noise(0.35, 0.6, 120);
+}
+
+function sfxLevelUp() {
+  if (!AC) return;
+  [392, 523, 659, 784, 1047].forEach((f, i) => _osc(f, 'square', 0.22, 0.18, null, AC.currentTime + i * 0.1));
+}
+
+// ── MUSIC: DOOM E1M1 "At Doom's Gate" inspired ────────────────────────────────
+const _B = 60 / 188; // one beat at 188 BPM
+const MUS_SEQ = [
+  // Phrase A
+  [164.81,_B*.5],[164.81,_B*.5],[329.63,_B*.5],[164.81,_B*.5],
+  [155.56,_B*.5],[164.81,_B*.5],[155.56,_B   ],[146.83,_B*1.5],
+  // Phrase B
+  [164.81,_B*.5],[164.81,_B*.5],[329.63,_B*.5],[164.81,_B*.5],
+  [196.00,_B*.5],[164.81,_B*.5],[155.56,_B   ],[130.81,_B*1.5],
+  // Phrase C
+  [164.81,_B*.5],[164.81,_B*.5],[329.63,_B*.5],[164.81,_B*.5],
+  [155.56,_B*.5],[164.81,_B*.5],[155.56,_B*.5],[146.83,_B*.5],[155.56,_B],
+  // Phrase D
+  [164.81,_B*.5],[164.81,_B*.5],[329.63,_B*.5],[164.81,_B*.5],
+  [155.56,_B*.5],[164.81,_B*.5],[175.61,_B*2 ],
+];
+
+function _distCurve() {
+  const c = new Float32Array(256), k = 280;
+  for (let i = 0; i < 256; i++) {
+    const x = (i * 2) / 255 - 1;
+    c[i] = (Math.PI + k) * x / (Math.PI + k * Math.abs(x));
+  }
+  return c;
+}
+const _DC = _distCurve();
+
+function _scheduleMus() {
+  if (!AC || !musActive) return;
+  let t = Math.max(AC.currentTime, musSchedUntil);
+  while (t < AC.currentTime + 0.5) {
+    const [freq, dur] = MUS_SEQ[musIdx % MUS_SEQ.length];
+    musIdx++;
+    if (!musMuted) {
+      const osc = AC.createOscillator(), ws = AC.createWaveShaper(), g = AC.createGain();
+      ws.curve = _DC;
+      osc.type = 'sawtooth'; osc.frequency.value = freq;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(1, t + 0.012);
+      g.gain.setValueAtTime(1, t + dur - 0.04);
+      g.gain.linearRampToValueAtTime(0, t + dur);
+      osc.connect(ws); ws.connect(g); g.connect(musOut);
+      osc.start(t); osc.stop(t + dur);
+    }
+    t += dur;
+  }
+  musSchedUntil = t;
+  musTid = setTimeout(_scheduleMus, 160);
+}
+
+function startMusic() {
+  if (!AC) return;
+  clearTimeout(musTid);
+  musActive = true; musIdx = 0; musSchedUntil = 0;
+  musOut.gain.setTargetAtTime(0.2, AC.currentTime, 0.1);
+  _scheduleMus();
+}
+
+function stopMusic() {
+  musActive = false;
+  clearTimeout(musTid);
+  if (musOut) musOut.gain.setTargetAtTime(0, AC.currentTime, 0.5);
+}
+
+function dimMusic(v) {
+  if (musOut) musOut.gain.setTargetAtTime(v, AC.currentTime, 0.2);
+}
+
+function toggleMute() {
+  musMuted = !musMuted;
+  dimMusic(musMuted ? 0 : 0.2);
+}
+
 // ── LEVEL CONFIG ──────────────────────────────────────────────────────────────
 const LEVELS = [
   { goal:10, interval:2200, max:5,  speed:75,  tw:[1,0,0]       },
@@ -73,6 +244,7 @@ const G = {
 canvas.addEventListener('mousemove', e => { G.mouse.x = e.clientX; G.mouse.y = e.clientY; });
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
+  initAudio();
   G.mouse.down = true;
   if (G.state === 'MENU') menuClick(e.clientX, e.clientY);
   else if (G.state === 'GAME_OVER') gameOverClick(e.clientX, e.clientY);
@@ -82,11 +254,13 @@ canvas.addEventListener('mousedown', e => {
 canvas.addEventListener('mouseup', e => { if (e.button === 0) G.mouse.down = false; });
 canvas.addEventListener('mouseleave', () => { G.mouse.down = false; });
 window.addEventListener('keydown', e => {
+  initAudio();
   G.keys[e.code] = true;
   if (e.code === 'Escape') {
     if (G.state === 'PLAYING') setState('PAUSED');
     else if (G.state === 'PAUSED') setState('PLAYING');
   }
+  if (e.code === 'KeyM') toggleMute();
   if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', e => { G.keys[e.code] = false; });
@@ -172,6 +346,7 @@ function shoot() {
   if (p.cooldown > 0) return;
   p.cooldown = p.rapidFire > 0 ? 100 : 220;
   p.flash = 8;
+  sfxShoot();
   const a = p.angle;
   const tx = p.x + Math.cos(a) * 34;
   const ty = p.y + Math.sin(a) * 34;
@@ -280,6 +455,7 @@ function mkBoss() {
     dashing: false, dvx:0, dvy:0, dtime:0,
   };
   G.bossActive = true;
+  sfxBossSpawn();
 }
 
 function updateBoss(dt) {
@@ -412,6 +588,7 @@ function handleCollisions() {
           tryDropPU(e.x, e.y);
           G.score += e.score;
           G.killCount++;
+          sfxEnemyDie();
           G.enemies.splice(ei,1);
           if (!G.bossActive && G.killCount >= getLvl(G.level).goal) mkBoss();
         }
@@ -424,6 +601,7 @@ function handleCollisions() {
       if (Math.hypot(b.x-bo.x, b.y-bo.y) < 6+bo.radius) {
         bo.hp--;
         spawnPfx(b.x,b.y,'#f88',6,100,5);
+        sfxBossHit();
         dead = true;
         if (bo.hp <= 0) {
           spawnPfx(bo.x,bo.y,'#f00',30,220,10);
@@ -432,6 +610,7 @@ function handleCollisions() {
           G.shakeTime = 600; G.shakeMag = 12;
           G.bossActive = false; G.boss = null;
           G.bossBullets = [];
+          sfxBossDie();
           setState('LEVEL_COMPLETE');
         }
       }
@@ -479,6 +658,7 @@ function damagePlayer() {
   p.hp--;
   p.iframes = 1600;
   G.shakeTime = 350; G.shakeMag = 9;
+  sfxPlayerHit();
   spawnPfx(p.x,p.y,'#f88',18,200,5);
   if (p.hp <= 0) {
     if (G.score > G.hiScore) { G.hiScore = G.score; localStorage.setItem('pa_hi', G.hiScore); }
@@ -491,10 +671,18 @@ function applyPU(type) {
   if (type==='health') { p.hp = Math.min(p.hp+1, p.maxHp); }
   else if (type==='rapidFire') { p.rapidFire = 5000; }
   else if (type==='spreadShot') { p.spreadShot = 5000; }
+  sfxPowerUp();
 }
 
 // ── STATE MANAGEMENT ──────────────────────────────────────────────────────────
 function setState(s) {
+  if (s === 'PLAYING') {
+    if (G.state === 'MENU' || G.state === 'GAME_OVER') startMusic();
+    else dimMusic(0.2);
+  }
+  if (s === 'PAUSED') dimMusic(0.05);
+  if (s === 'GAME_OVER' || s === 'MENU') stopMusic();
+  if (s === 'LEVEL_COMPLETE') sfxLevelUp();
   G.state = s;
   if (s === 'LEVEL_COMPLETE') { G.lvlTimer = 2500; }
   if (s !== 'PLAYING') { G.keys = {}; G.mouse.down = false; }
@@ -728,7 +916,7 @@ function drawMenu() {
   ctx.font='18px monospace'; ctx.fillStyle='#ff0'; ctx.textAlign='center';
   ctx.fillText(`HI-SCORE: ${G.hiScore}`, W/2, H/2+115);
   ctx.font='14px monospace'; ctx.fillStyle='#555';
-  ctx.fillText('MOVE: WASD  |  AIM: MOUSE  |  FIRE: CLICK  |  PAUSE: ESC', W/2, H-40);
+  ctx.fillText('MOVE: WASD  |  AIM: MOUSE  |  FIRE: CLICK  |  PAUSE: ESC  |  MUTE: M', W/2, H-40);
 }
 
 function drawGameOver() {
@@ -774,7 +962,7 @@ function drawPaused() {
   ctx.fillText('MAIN MENU', W/2, my+36);
   // Hint
   ctx.font='13px monospace'; ctx.fillStyle='#444';
-  ctx.fillText('ESC to resume', W/2, H/2+165);
+  ctx.fillText(`ESC to resume  |  M to ${musMuted ? 'unmute' : 'mute'}`, W/2, H/2+165);
 }
 
 function drawLevelComplete() {
